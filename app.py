@@ -1,14 +1,3 @@
-import asyncio
-import sys as _sys
-
-# Windows fix: MCP's stdio transport spawns subprocesses via asyncio, which
-# only works under the Proactor event loop on Windows (the Selector loop
-# uvicorn sometimes defaults to raises NotImplementedError for subprocesses).
-# This must be set before uvicorn creates its event loop.
-if _sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
-import os
 from pathlib import Path
 import traceback
 import uvicorn
@@ -70,9 +59,7 @@ async def travel_planner(request_data: TravelRequest):
                 }
             )
 
-        # run_travel_agent is now async (it awaits the MCP-based search
-        # agents internally), so it must be awaited here too.
-        result = await run_travel_agent(
+        result = run_travel_agent(
             user_input=user_message,
             thread_id=request_data.thread_id
         )
@@ -94,9 +81,8 @@ async def travel_planner(request_data: TravelRequest):
         )
 
     except Exception as e:
-        print("ERROR:", e, flush=True)
+        print("ERROR:", e)
         traceback.print_exc()
-        _sys.stdout.flush()
 
         return JSONResponse(
             status_code=500,
@@ -121,10 +107,9 @@ async def favicon():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
         "app:app",
-        host="0.0.0.0",
-        port=port,
-        reload=False  # temporarily off while debugging — Windows reload subprocess can buffer/hide print output
+        host="127.0.0.1",
+        port=8000,
+        reload=True
     )

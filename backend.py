@@ -1,5 +1,4 @@
-import os
-import asyncio
+import os 
 import certifi
 from dotenv import load_dotenv
 
@@ -24,7 +23,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 from langchain_groq import ChatGroq
-from tools.mcp_client import duckduckgo_mcp_search, weather_mcp_search, forecast_mcp_search, extract_destination
+from tools.search_tool import duckduckgo_search
 from tools.flight_tool import search_flights
 
 
@@ -67,13 +66,12 @@ class TravelState(TypedDict):
     train_results: str
     ship_results: str
     cab_results: str
-    weather_results: str
     itinerary: str
     llm_calls: int
 
 
 # =========================
-# Flight Agent (direct REST API — no MCP, no asyncio involved)
+# Flight Agent
 # =========================
 
 def flight_agent(state: TravelState):
@@ -90,17 +88,12 @@ def flight_agent(state: TravelState):
 
 
 # =========================
-# Hotel Agent (MCP-based)
+# Hotel Agent
 # =========================
-# NOTE: these nodes are plain sync `def`s. Each one calls asyncio.run()
-# to run its MCP coroutine — this creates a fresh, isolated event loop
-# for just that call, which is what lets MCP's subprocess-based stdio
-# transport work on Windows (Proactor loop) without ever touching or
-# conflicting with the synchronous Postgres checkpointer below.
 
 def hotel_agent(state: TravelState):
     query = f"Best hotels for {state['user_query']}"
-    hotel_results = asyncio.run(duckduckgo_mcp_search(query))
+    hotel_results = duckduckgo_search(query)
 
     return {
         "hotel_results": hotel_results,
@@ -112,12 +105,12 @@ def hotel_agent(state: TravelState):
 
 
 # =========================
-# Bus Agent (MCP-based)
+# Bus Agent
 # =========================
 
 def bus_agent(state: TravelState):
     query = f"Best bus routes and options for {state['user_query']}"
-    bus_results = asyncio.run(duckduckgo_mcp_search(query))
+    bus_results = duckduckgo_search(query)
 
     return {
         "bus_results": bus_results,
@@ -129,12 +122,12 @@ def bus_agent(state: TravelState):
 
 
 # =========================
-# Train Agent (MCP-based)
+# Train Agent
 # =========================
 
 def train_agent(state: TravelState):
     query = f"Best train routes and options for {state['user_query']}"
-    train_results = asyncio.run(duckduckgo_mcp_search(query))
+    train_results = duckduckgo_search(query)
 
     return {
         "train_results": train_results,
@@ -146,12 +139,12 @@ def train_agent(state: TravelState):
 
 
 # =========================
-# Ship Agent (MCP-based)
+# Ship Agent
 # =========================
 
 def ship_agent(state: TravelState):
     query = f"Best ferry or cruise options for {state['user_query']}"
-    ship_results = asyncio.run(duckduckgo_mcp_search(query))
+    ship_results = duckduckgo_search(query)
 
     return {
         "ship_results": ship_results,
@@ -163,12 +156,12 @@ def ship_agent(state: TravelState):
 
 
 # =========================
-# Cab/Taxi Agent (MCP-based)
+# Cab/Taxi Agent
 # =========================
 
 def cab_agent(state: TravelState):
     query = f"Local cab and taxi options with estimated fares for {state['user_query']}"
-    cab_results = asyncio.run(duckduckgo_mcp_search(query))
+    cab_results = duckduckgo_search(query)
 
     return {
         "cab_results": cab_results,
@@ -180,32 +173,7 @@ def cab_agent(state: TravelState):
 
 
 # =========================
-# Weather Agent (MCP-based)
-# =========================
-
-def weather_agent(state: TravelState):
-    destination = extract_destination(state["user_query"])
-
-    async def _fetch_weather():
-        return await asyncio.gather(
-            weather_mcp_search(destination),
-            forecast_mcp_search(destination),
-        )
-
-    current, forecast = asyncio.run(_fetch_weather())
-    weather_results = f"{current}\n\n{forecast}"
-
-    return {
-        "weather_results": weather_results,
-        "messages": [
-            AIMessage(content="Weather information fetched.")
-        ],
-        "llm_calls": state.get("llm_calls", 0) + 1
-    }
-
-
-# =========================
-# Itinerary Agent (pure LLM call)
+# Itinerary Agent
 # =========================
 
 def itinerary_agent(state: TravelState):
@@ -233,10 +201,7 @@ Ship Results:
 Cab/Taxi Results:
 {state['cab_results']}
 
-Weather Forecast:
-{state['weather_results']}
-
-Make the itinerary practical, budget-aware, weather-appropriate, and easy to follow.
+Make the itinerary practical, budget-aware, and easy to follow.
 """
 
     response = llm.invoke([
@@ -252,7 +217,7 @@ Make the itinerary practical, budget-aware, weather-appropriate, and easy to fol
 
 
 # =========================
-# Final Response Agent (pure LLM call)
+# Final Response Agent
 # =========================
 
 def final_agent(state: TravelState):
@@ -280,9 +245,6 @@ Ships/Ferries:
 Cabs/Taxis:
 {state['cab_results']}
 
-Weather Forecast:
-{state['weather_results']}
-
 Itinerary:
 {state['itinerary']}
 
@@ -295,10 +257,9 @@ Format the final answer beautifully using these sections:
 5. Train Options
 6. Ship/Ferry Options
 7. Cab/Taxi Options
-8. Weather Forecast
-9. Day-by-Day Itinerary
-10. Estimated Budget
-11. Final Recommendations
+8. Day-by-Day Itinerary
+9. Estimated Budget
+10. Final Recommendations
 
 Important:
 - Be clear and practical.
@@ -333,7 +294,6 @@ graph.add_node("bus_agent", bus_agent)
 graph.add_node("train_agent", train_agent)
 graph.add_node("ship_agent", ship_agent)
 graph.add_node("cab_agent", cab_agent)
-graph.add_node("weather_agent", weather_agent)
 graph.add_node("itinerary_agent", itinerary_agent)
 graph.add_node("final_agent", final_agent)
 
@@ -343,8 +303,7 @@ graph.add_edge("hotel_agent", "bus_agent")
 graph.add_edge("bus_agent", "train_agent")
 graph.add_edge("train_agent", "ship_agent")
 graph.add_edge("ship_agent", "cab_agent")
-graph.add_edge("cab_agent", "weather_agent")
-graph.add_edge("weather_agent", "itinerary_agent")
+graph.add_edge("cab_agent", "itinerary_agent")
 graph.add_edge("itinerary_agent", "final_agent")
 graph.add_edge("final_agent", END)
 
@@ -352,9 +311,6 @@ graph.add_edge("final_agent", END)
 # =========================
 # PostgreSQL Checkpointer
 # =========================
-# Plain sync psycopg connection — no asyncio involved at all, so this has
-# zero dependency on event loop type and cannot conflict with the Proactor
-# loop each MCP-based node creates via asyncio.run().
 DATABASE_URL = get_database_url()
 
 _conn = psycopg.connect(
@@ -372,13 +328,8 @@ travel_graph = graph.compile(checkpointer=checkpointer)
 # =========================
 # Function for FastAPI
 # =========================
-# run_travel_agent is async so FastAPI can `await` it without blocking
-# the server, but the graph itself runs synchronously — via
-# asyncio.to_thread — in a worker thread. That's what lets each node
-# safely call asyncio.run() internally (a thread with no existing event
-# loop is required for asyncio.run() to create a fresh one cleanly).
 
-async def run_travel_agent(user_input: str, thread_id: str | None = None):
+def run_travel_agent(user_input: str, thread_id: str | None = None):
     if not thread_id:
         thread_id = f"user_{uuid.uuid4().hex}"
 
@@ -388,25 +339,21 @@ async def run_travel_agent(user_input: str, thread_id: str | None = None):
         }
     }
 
-    initial_state = {
-        "messages": [
-            HumanMessage(content=user_input)
-        ],
-        "user_query": user_input,
-        "flight_results": "",
-        "hotel_results": "",
-        "bus_results": "",
-        "train_results": "",
-        "ship_results": "",
-        "cab_results": "",
-        "weather_results": "",
-        "itinerary": "",
-        "llm_calls": 0
-    }
-
-    result = await asyncio.to_thread(
-        travel_graph.invoke,
-        initial_state,
+    result = travel_graph.invoke(
+        {
+            "messages": [
+                HumanMessage(content=user_input)
+            ],
+            "user_query": user_input,
+            "flight_results": "",
+            "hotel_results": "",
+            "bus_results": "",
+            "train_results": "",
+            "ship_results": "",
+            "cab_results": "",
+            "itinerary": "",
+            "llm_calls": 0
+        },
         config=config
     )
 
@@ -421,7 +368,6 @@ async def run_travel_agent(user_input: str, thread_id: str | None = None):
         "train_results": result.get("train_results", ""),
         "ship_results": result.get("ship_results", ""),
         "cab_results": result.get("cab_results", ""),
-        "weather_results": result.get("weather_results", ""),
         "itinerary": result.get("itinerary", ""),
         "llm_calls": result.get("llm_calls", 0),
     }
